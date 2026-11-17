@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readJson,sourceEnvironment} from '../inputs.mjs';
-import {fileHash,treeHash,assertPortable} from './provenance.mjs';
+import {fileHash,treeHash,assertPortable,validatePackagedArchitecture} from './provenance.mjs';
 import {sourceArchiveArgs} from './source-archive.mjs';
 import {noticeModuleInventory,verifySourceNoticeArchive,verifySourceNotices} from '../source-notices.mjs';
 const [outputArg,validationArg]=process.argv.slice(2);
@@ -14,7 +14,9 @@ if(!outputArg||!validationArg||process.argv.length!==4)throw Error('BUILD_OUTPUT
 const output=await fs.realpath(outputArg),validation=await fs.realpath(validationArg);
 const built=await readJson(output+'/built.json'),proof=await readJson(validation+'/results.json');
 if(built.metadata.targetArchitecture!=='arm64'||built.graph.proton!==process.env.GITHUB_SHA||!/^nexus-runtime-11\.0-experimental-arm64-g[a-f0-9]{8}$/.test(built.name)||path.dirname(built.runtime)!==output||path.basename(built.runtime)!==built.name)throw Error('Not the exact ARM64 main distribution source');
+if(built.metadata.stableApproved!==false||built.metadata.realGameTest!==false||built.metadata.promotable===false||built.diagnosticOnly)throw Error('ARM64 candidate cannot claim Stable, game or local-diagnostic status');
 const gates=['arm64-layout','arm64-prefix-boot','arm64-load-aarch64','arm64-load-x86_64','arm64-load-i386',...['win64','win32'].flatMap(abi=>['component','authentication','user-contracts','store'].map(gate=>abi+'-'+gate)),'arm64-http','arm64-media','arm64-graphics'];
+validatePackagedArchitecture(built,{arch:'arm64',repository:process.env.GITHUB_REPOSITORY,proofArch:proof.arch,gates:proof.results?.map(result=>result.name)});
 if(proof.passed!==true||proof.arch!=='arm64'||proof.stableApproved!==false||proof.realGameTest!==false||proof.builtSha256!==await fileHash(output+'/built.json')||proof.treeSha256!==await treeHash(built.runtime)||JSON.stringify(proof.graph)!==JSON.stringify(built.graph))throw Error('Unvalidated or changed runtime');
 if(proof.results.length!==gates.length||proof.results.some((r,i)=>r.name!==gates[i]||r.status!==0||r.signal||r.error))throw Error('Incomplete or failed ARM64 gates');
 for(const r of proof.results)if(!r.log.startsWith(validation+'/')||await fileHash(r.log)!==r.sha256)throw Error('Changed native log');
@@ -43,6 +45,7 @@ for(const name of [binary,source]){
   await fs.writeFile(output+'/'+checksum,await fileHash(output+'/'+name,'sha512')+'  '+name+'\n',{flag:'wx'});
   for(const file of [name,checksum])files.push({name:file,sha256:await fileHash(output+'/'+file),size:(await fs.stat(output+'/'+file)).size});
 }
+// The ARM64 target belongs only to the verified Standard repository.
 const manifest={schema:1,kind:'runtime',arch:'arm64',promotable:process.env.GITHUB_REPOSITORY==='domsvoboda/nexus-runtime',repository:process.env.GITHUB_REPOSITORY,commit:process.env.GITHUB_SHA,ref:process.env.GITHUB_REF,runId:process.env.GITHUB_RUN_ID,files,sourceGraph:built.graph,sdk:built.inputs.sdkArm64,auxiliaryToolchain:built.metadata.auxiliaryToolchain,requiresBackendVersion:built.metadata.requiresBackendVersion,requiresLauncherVersion:built.metadata.requiresLauncherVersion,validation:{nativeGateCount:proof.results.length,treeSha256:proof.treeSha256,resultsSha256:await fileHash(validation+'/results.json'),realGameTest:false,stableApproved:false}};
 await fs.writeFile(output+'/candidate.json',JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});
 console.log('Packaged exact validated ARM64 main CI bytes and corresponding sources. No release was published.');

@@ -92,9 +92,10 @@ const links=await makeSdkLinksPortable(runtime,build);
 const payloadContract=await verifyRuntimePayload(runtime,{family:inputs.variant?.family??'nexus',arch:target.name,pins:new Map(noticeModuleInventory(graph).map(({path:modulePath,commit})=>[modulePath,commit]))});
 metadata.payloadContract=payloadContract;
 await fs.writeFile(path.join(runtime,'XODUS_NEXUS_PATCH.json'),JSON.stringify(metadata,null,2)+'\n',{flag:'wx'});
-/* Managed family receipts are x64-only. The native ARM64 build remains the
- * legacy experimental path and must not emit an x64 managed manifest. */
-const familyReceipt=target.name==='x86_64'?await writeFamilyManifest(runtime,{family:'nexus',sourceRepository:'domsvoboda/nexus-runtime',sourceCommit:graph.proton,sourceLockSha256:lockHash}):undefined;
+/* Each target of this Standard producer writes its own schema1 family receipt;
+ * the receipt arch names the real layout it inventories and never relabels
+ * another. A variant family cannot be written from this repository. */
+const familyReceipt=inputs.variant?undefined:await writeFamilyManifest(runtime,{family:'nexus',sourceRepository:'domsvoboda/nexus-runtime',sourceCommit:graph.proton,sourceLockSha256:lockHash,arch:target.name==='arm64'?'arm64':'x64'});
 await fs.writeFile(path.join(output,'built.json'),JSON.stringify({schema:1,...(localBuild?{localBuild:true,diagnosticOnly:true,promotable:false}:{}),name,runtime,metadata,inputs,graph,source,prepared:work,aux,links,payloadContract,familyReceipt},null,2)+'\n',{flag:'wx'});
 console.log('Built an isolated Experimental candidate. Native validation is still required.');
 
