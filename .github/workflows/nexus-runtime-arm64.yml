@@ -9,13 +9,16 @@ concurrency:
   group: runtime-candidate-arm64-${{ github.ref }}
   cancel-in-progress: false
 env:
+  # The ARM64 target is the Standard family only. A manual main dispatch on this
+  # own repository builds the candidate; ordinary pushes stay source-only and
+  # never compile. Packaging additionally requires the Standard main build SHA.
   # ARM64X nghttp2 needs llvm-mingw on the aarch64 host. Both values are
   # mandatory: the build fails if either is missing or the archive differs.
   NEXUS_LLVM_MINGW_URL: https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-ubuntu-22.04-aarch64.tar.xz
   NEXUS_LLVM_MINGW_SHA256: e77c4acfa44184f6b0c52b814d724ad63b2ecebb3c3f6f842c0846e717cbd23c
 jobs:
   auxiliary:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'domsvoboda/nexus-runtime'
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 60
     steps:
@@ -61,7 +64,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   runtime:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'domsvoboda/nexus-runtime'
     needs: auxiliary
     outputs:
       checkpoint: ${{ steps.checkpoint.outputs.name }}
@@ -105,7 +108,7 @@ jobs:
       - name: Check exact clean source and ARM64 build policy
         run: |
           node nexus/check-source.mjs
-          node --test nexus/inputs.test.mjs nexus/sdk-build-plan.test.mjs nexus/build-policy.test.mjs nexus/llvm-mingw.test.mjs
+          node --test nexus/inputs.test.mjs nexus/sdk-build-plan.test.mjs nexus/build-policy.test.mjs nexus/llvm-mingw.test.mjs nexus/runtime-payload-contract.test.mjs nexus/family-manifest.test.mjs nexus/ci/distribution.test.mjs
       - id: cache-plan
         run: node nexus/ci/cache-plan.mjs --arch arm64
       - uses: actions/cache/restore@v4
@@ -141,7 +144,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   validation:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'domsvoboda/nexus-runtime'
     needs: runtime
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90

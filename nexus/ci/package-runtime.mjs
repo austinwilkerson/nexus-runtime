@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {readJson,sourceEnvironment} from '../inputs.mjs';
-import {fileHash,treeHash,assertPortable,validateGateResults} from './provenance.mjs';
+import {fileHash,treeHash,assertPortable,validateGateResults,validatePackagedArchitecture} from './provenance.mjs';
 import {sourceArchiveArgs} from './source-archive.mjs';
 import {noticeModuleInventory,verifySourceNoticeArchive,verifySourceNotices} from '../source-notices.mjs';
 const [outputArg,validationArg]=process.argv.slice(2);
@@ -14,6 +14,7 @@ const built=await readJson(output+'/built.json'),proof=await readJson(validation
 if(built.diagnosticOnly||built.promotable===false||built.metadata.diagnosticOnly||built.metadata.promotable===false||built.graph.proton!==process.env.GITHUB_SHA||!/^nexus-runtime-11\.0-experimental-g[a-f0-9]{8}$/.test(built.name)||path.dirname(built.runtime)!==output||path.basename(built.runtime)!==built.name)throw Error('Not the exact main distribution source');
 if(proof.passed!==true||proof.stableApproved!==false||proof.realGameTest!==false||proof.realAccountTest!==false||proof.realCloudTest!==false||proof.builtSha256!==await fileHash(output+'/built.json')||proof.treeSha256!==await treeHash(built.runtime)||JSON.stringify(proof.graph)!==JSON.stringify(built.graph))throw Error('Unvalidated or changed runtime');
 validateGateResults(proof.results);await assertPortable(built.runtime);
+validatePackagedArchitecture(built,{arch:'x64',repository:process.env.GITHUB_REPOSITORY,proofArch:'x64',gates:proof.results.map(result=>result.name)});
 for(const r of proof.results){if(!r.log.startsWith(validation+'/')||await fileHash(r.log)!==r.sha256)throw Error('Changed native log');}
 for(const [relative,expected]of Object.entries(proof.bindings)){
   const file=path.resolve(validation,relative);if(!file.startsWith(validation+'/')||!(await fs.realpath(file)).startsWith(validation+'/')||await fileHash(file)!==expected)throw Error('Changed native result');

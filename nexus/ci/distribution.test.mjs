@@ -6,7 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {project,repository} from '../inputs.mjs';
 import {cachePlan} from './cache-plan.mjs';
-import {validateGateResults} from './provenance.mjs';
+import {validateGateResults,gateNames,validatePackagedArchitecture} from './provenance.mjs';
 import {sourceArchiveArgs} from './source-archive.mjs';
 import {TEST_GROUPS,NATIVE_TEST_FILES,buildPlan} from './source-check-plan.mjs';
 import os from 'node:os';
@@ -152,6 +152,86 @@ test('all twelve native gate identities must pass in exact order without omissio
   for(const change of [{status:1},{signal:'SIGTERM'},{error:'timeout'},{name:'win64-component'},{sha256:'invalid'}]){
     const altered=structuredClone(values);Object.assign(altered[5],change);assert.throws(()=>validateGateResults(altered));
   }
+});
+test('ARM64 packager gates are the exact sixteen native gates and x64 keeps twelve',()=>{
+  const arm64=gateNames('arm64');
+  assert.deepEqual(arm64,['arm64-layout','arm64-prefix-boot','arm64-load-aarch64','arm64-load-x86_64','arm64-load-i386',
+    'win64-component','win64-authentication','win64-user-contracts','win64-store',
+    'win32-component','win32-authentication','win32-user-contracts','win32-store',
+    'arm64-http','arm64-media','arm64-graphics']);
+  const values=arm64.map(name=>({name,status:0,signal:null,sha256:'a'.repeat(64)}));
+  validateGateResults(values,'arm64');
+  assert.throws(()=>validateGateResults(values.slice(0,12),'arm64'));
+  const altered=structuredClone(values);altered[15].status=1;assert.throws(()=>validateGateResults(altered,'arm64'));
+  // The x86_64 names cannot be reused as an ARM64 proof and vice versa.
+  assert.throws(()=>validateGateResults(values.slice(5,17),'arm64'));
+  assert.equal(gateNames('x64').length,12);
+  assert.throws(()=>gateNames('riscv64'));
+  const packager=fs.readFileSync(path.join(project,'ci','package-runtime-arm64.mjs'),'utf8');
+  assert.match(packager,/const gates=\['arm64-layout'/);
+  assert.match(packager,/validatePackagedArchitecture\(built,\{arch:'arm64'/);
+  assert.doesNotMatch(packager,/non-x86_64-minimal/);
+});
+test('packagers refuse a relabelled architecture, a foreign name stem or a foreign repository',()=>{
+  const arm64Name='nexus-runtime-11.0-experimental-arm64-g'+'a'.repeat(8);
+  const x64Name='nexus-runtime-11.0-experimental-g'+'a'.repeat(8);
+  const metadata={targetArchitecture:'arm64'};
+  const armBuilt={name:arm64Name,runtime:'/out/'+arm64Name,metadata};
+  const own='domsvoboda/nexus-runtime';
+  assert.equal(validatePackagedArchitecture(armBuilt,{arch:'arm64',repository:own,proofArch:'arm64',gates:gateNames('arm64')}).name,arm64Name);
+  // An ARM64 payload named like x64, claimed as x64 or packed for another family fails.
+  assert.throws(()=>validatePackagedArchitecture(armBuilt,{arch:'x64',repository:own,proofArch:'x64',gates:gateNames('x64')}));
+  assert.throws(()=>validatePackagedArchitecture({...armBuilt,name:x64Name,runtime:'/out/'+x64Name},{arch:'arm64',repository:own,proofArch:'arm64',gates:gateNames('arm64')}),/does not match its architecture/);
+  // The CachyOS family repository, a bare family name or an empty repository is not this producer.
+  for(const repository of ['domsvoboda/nexus-runtime-cachyos','foreign/nexus-runtime','nexus-runtime','',' domsvoboda/nexus-runtime'])
+    assert.throws(()=>validatePackagedArchitecture(armBuilt,{arch:'arm64',repository,proofArch:'arm64',gates:gateNames('arm64')}),/repository identity/);
+  assert.throws(()=>validatePackagedArchitecture(armBuilt,{arch:'arm64',repository:own,proofArch:'x64',gates:gateNames('arm64')}),/disagree/);
+  assert.throws(()=>validatePackagedArchitecture({...armBuilt,metadata:{}},{arch:'arm64',repository:own,proofArch:'arm64',gates:gateNames('arm64')}),/not the packaged architecture/);
+  assert.throws(()=>validatePackagedArchitecture(armBuilt,{arch:'arm64',repository:own,proofArch:'arm64',gates:gateNames('arm64').slice(0,15)}),/native gates/);
+  // The x64 packager keeps its own exact name and the same fixed repository identity.
+  const x64Built={name:x64Name,runtime:'/out/'+x64Name,metadata:{}};
+  assert.equal(validatePackagedArchitecture(x64Built,{arch:'x64',repository:own,proofArch:'x64',gates:gateNames('x64')}).arch,'x64');
+  assert.throws(()=>validatePackagedArchitecture({...x64Built,name:arm64Name,runtime:'/out/'+arm64Name},{arch:'x64',repository:own,proofArch:'x64',gates:gateNames('x64')}),/does not match its architecture/);
+  assert.throws(()=>validatePackagedArchitecture(x64Built,{arch:'x64',repository:'domsvoboda/nexus-runtime-cachyos',proofArch:'x64',gates:gateNames('x64')}),/repository identity/);
+});
+test('actual packager CLI accepts canonical names and repository before rejecting untrusted native logs',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'runtime-packager-preflight-'));
+  try{
+    for(const arch of ['x64','arm64']){
+      const output=path.join(root,arch),validation=path.join(output,'validation');
+      fs.mkdirSync(validation,{recursive:true});
+      const name='nexus-runtime-11.0-experimental'+(arch==='arm64'?'-arm64':'')+'-gaaaaaaaa';
+      const runtime=path.join(output,name);fs.mkdirSync(runtime);
+      const built={name,runtime,graph:{proton:'a'.repeat(40)},metadata:{stableApproved:false,realGameTest:false,...(arch==='arm64'?{targetArchitecture:'arm64'}:{})}};
+      const proof={passed:true,arch,stableApproved:false,realGameTest:false,realAccountTest:false,realCloudTest:false,graph:built.graph,treeSha256:sha256Bytes(''),results:gateNames(arch).map(name=>({name,status:0,sha256:'b'.repeat(64),log:'/outside/untrusted-native.log'}))};
+      const invoke=(repository='domsvoboda/nexus-runtime')=>{
+        const bytes=JSON.stringify(built);fs.writeFileSync(output+'/built.json',bytes);
+        fs.writeFileSync(validation+'/results.json',JSON.stringify({...proof,builtSha256:sha256Bytes(bytes)}));
+        return spawnSync(process.execPath,[project+'/ci/package-runtime'+(arch==='arm64'?'-arm64':'')+'.mjs',output,validation],{encoding:'utf8',timeout:10000,env:{...process.env,GITHUB_REF:'refs/heads/main',GITHUB_REPOSITORY:repository,GITHUB_SHA:'a'.repeat(40),GITHUB_RUN_ID:'123'}});
+      };
+      const canonical=invoke();assert.notEqual(canonical.status,0);assert.match(canonical.stderr,/Changed native log/,arch+': '+canonical.stderr);
+      built.name='wrong-family-'+name;built.runtime=path.join(output,built.name);
+      const invalid=invoke();assert.notEqual(invalid.status,0);assert.match(invalid.stderr,/Not the exact .*distribution source/,arch+': '+invalid.stderr);
+      built.name=name;built.runtime=runtime;
+      const foreign=invoke('foreign/nexus-runtime');assert.notEqual(foreign.status,0);assert.match(foreign.stderr,/Packaging requires an exact main|repository identity/,arch+': '+foreign.stderr);
+      assert.equal(fs.existsSync(output+'/candidate.json'),false);
+    }
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+test('the ARM64 workflow builds only as its own family on manual main and never on push',()=>{
+  const text=fs.readFileSync(path.join(repository,'.github/workflows/nexus-runtime-arm64.yml'),'utf8');
+  const jobs=text.slice(text.indexOf('\njobs:\n')).split(/\n  (?=[a-z-]+:\n)/).slice(1);
+  assert.ok(jobs.length>=3);
+  for(const job of jobs)assert.equal(job.split('\n')[1],"    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'domsvoboda/nexus-runtime'");
+  assert.match(text,/^on:\n  push:\n    branches: \[main\]\n  workflow_dispatch:\npermissions:\n  contents: read\n/m);
+  assert.doesNotMatch(text,/pull_request|contents: write|gh release|secrets\./);
+  // Ordinary pushes never reach a compile or packaging step.
+  assert.match(text,/node nexus\/build-runtime\.mjs --arch arm64 /);
+  assert.match(text,/node nexus\/ci\/package-runtime-arm64\.mjs /);
+  // The x64 workflow is unchanged and still main-only on its own repository.
+  const x64=fs.readFileSync(path.join(repository,'.github/workflows/nexus-runtime.yml'),'utf8');
+  assert.equal((x64.match(/if: github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'/g)||[]).length,3);
+  assert.doesNotMatch(x64,/github\.repository ==/);
 });
 test('actual source archive preserves nested source and gitlinks, never credentials or binary downloads',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'nexus-source-archive-'));
