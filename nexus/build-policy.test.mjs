@@ -60,7 +60,8 @@ test('ARM64 candidate workflow compiles only from an explicit manual dispatch on
   const jobs=text.slice(text.indexOf('\njobs:\n')).split(/\n  (?=[a-z-]+:\n)/).slice(1);
   assert.equal(jobs.length,(text.match(/^    runs-on: /gm)||[]).length);
   assert.ok(jobs.length>=2);
-  for(const job of jobs)assert.ok(job.split('\n')[1]==="    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'");
+  // Manual main dispatch on this family's own repository only; a push is source-only.
+  for(const job of jobs)assert.equal(job.split('\n')[1],"    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'domsvoboda/nexus-runtime'");
   assert.match(text,/node nexus\/build-auxiliary\.mjs --arch arm64 /);
   assert.match(text,/node nexus\/build-runtime\.mjs --arch arm64 /);
   assert.match(text,/runs-on: ubuntu-24\.04-arm/);
@@ -73,10 +74,13 @@ test('ARM64 workflow supplies the exact llvm-mingw archive and SHA-256',()=>{
 
 test('ordinary push and pull request events never compile x64 or ARM64 candidates',()=>{
   const guard="github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'";
-  for(const file of ['nexus-runtime.yml','nexus-runtime-arm64.yml']){
+  // The ARM64 candidate is the Standard family's own repository and adds that
+  // exact repository guard; x64 keeps its unchanged main-only guard.
+  const guards={'nexus-runtime.yml':guard,'nexus-runtime-arm64.yml':guard+" && github.repository == 'domsvoboda/nexus-runtime'"};
+  for(const [file,expected] of Object.entries(guards)){
     const text=fs.readFileSync(path.join(repository,'.github/workflows',file),'utf8');
     const jobs=text.slice(text.indexOf('\njobs:\n')).split(/\n  (?=[a-z-]+:\n)/).slice(1);
-    for(const job of jobs)assert.equal(job.split('\n')[1],'    if: '+guard);
+    for(const job of jobs)assert.equal(job.split('\n')[1],'    if: '+expected);
   }
   const evaluate=(event,ref)=>event==='workflow_dispatch'&&ref==='refs/heads/main';
   for(const event of ['push','pull_request'])

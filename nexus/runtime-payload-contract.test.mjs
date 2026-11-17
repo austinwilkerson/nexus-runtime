@@ -165,8 +165,12 @@ test('family metadata does not leak CachyOS claims into Standard', () => {
   assert.throws(() => payloadContract('nexus', {arch: 'riscv64'}));
   assert.throws(() => payloadContract('nexus-cachyos', {arch: 'arm64'}), /Unreviewed CachyOS payload architecture/);
   const arm64 = payloadContract('nexus', {arch: 'arm64'});
-  assert.equal(arm64.scope, 'non-x86_64-minimal');
-  assert.ok(arm64.entries.every(item => item.arch === 'any'));
+  // The old minimal arm64 tuple is replaced by the real Standard ARM64 layout;
+  // the CachyOS refusal above still holds.
+  assert.equal(arm64.scope, 'arm64-full');
+  assert.ok(arm64.entries.some(item => item.path === 'files/bin-arm64/wine'));
+  assert.ok(arm64.entries.every(item => item.arch === 'any' || item.arch === 'arm64'));
+  assert.equal(arm64.runtimeProvided.length, 0);
 });
 
 test('the CachyOS runtime-provided claims bind the exact protonfixes gitlink', {skip: sourceFamily !== 'nexus-cachyos' ? 'not the CachyOS source tree' : false}, () => {
@@ -515,11 +519,75 @@ test('a CachyOS payload is not required from an ordinary Standard assembly', asy
   });
 });
 
-test('the honest Standard ARM64 guard accepts only the minimal shared payload', async () => {
+test('the Standard ARM64 contract requires the real ARM64 layout and still refuses CachyOS ARM64', async () => {
   await withFixture('standard-arm64', {family: 'nexus', arch: 'arm64'}, async runtime => {
     const proof = await verifyRuntimePayload(runtime, {family: 'nexus', arch: 'arm64'});
-    assert.equal(proof.scope, 'non-x86_64-minimal');
-    assert.deepEqual(proof.defaultDisabled, []);
+    assert.equal(proof.scope, 'arm64-full');
+    assert.equal(proof.family, 'nexus');
+    // No required entry is a relabelled x64 path or an x86_64-only directory.
+    const x64Only = item => ['files/bin/wine', 'files/bin/wineserver', 'files/share/default_pfx/drive_c'].some(prefix => item.path === prefix || item.path.startsWith(prefix + '/'))
+      || /^files\/lib\/wine\/(x86_64|i386)-(unix)\/$/.test(item.path);
+    assert.ok(!proof.entries.some(x64Only), JSON.stringify(proof.entries.filter(x64Only)));
+    const paths = new Set(proof.entries.map(item => item.path));
+    for (const item of [
+      'files/bin-arm64/wine', 'files/bin-arm64/wineserver', 'files/bin-arm64/wine.nexus-original',
+      'files/share/default_pfx_arm64/drive_c/windows/system32', 'files/share/fex-emu/Config.json',
+      'files/lib/wine/aarch64-unix/libarm64ecfex.so', 'files/lib/wine/aarch64-unix/libwow64fex.so',
+      'files/lib/wine/aarch64-windows/umu.exe', 'files/lib/wine/x86_64-windows/umu.exe', 'files/lib/wine/i386-windows/umu.exe',
+      'files/lib/wine/aarch64-windows/libarm64ecfex.dll', 'files/lib/wine/aarch64-windows/xgameruntime.dll',
+      'files/lib/wine/aarch64-windows/winhttp.dll', 'files/lib/wine/aarch64-windows/libnghttp2.dll',
+      'files/lib/wine/x86_64-windows/xgameruntime.dll', 'files/lib/wine/x86_64-windows/winhttp.dll', 'files/lib/wine/x86_64-windows/libnghttp2.dll',
+      'files/lib/wine/i386-windows/xgameruntime.dll', 'files/lib/wine/i386-windows/winhttp.dll', 'files/lib/wine/i386-windows/libnghttp2.dll',
+      'files/lib/vkd3d/aarch64-windows/libvkd3d-shader-1.dll', 'files/lib/wine/dxvk/aarch64-windows/d3d11.dll',
+      'files/lib/wine/vkd3d-proton/aarch64-windows/d3d12.dll', 'files/share/wine/mono/wine-mono', 'files/share/xalia/SDL3.dll',
+    ]) assert.ok(paths.has(item), 'missing ARM64 requirement ' + item);
+    // Real narrower ARM64 targets are recorded honestly, not faked as parity.
+    assert.deepEqual(proof.narrowerTargets.map(item => item.feature), ['wine-mono', 'controller-sdl']);
+    for (const item of proof.narrowerTargets) assert.ok(item.evidence && item.detail, item.feature);
     await assert.rejects(() => verifyRuntimePayload(runtime, {family: 'nexus-cachyos', arch: 'arm64'}), /Unreviewed CachyOS payload architecture/);
+    await assert.rejects(() => verifyRuntimePayload(runtime, {family: 'nexus', arch: 'riscv64'}), /Unsupported payload contract architecture/);
+  });
+});
+test('x86_64 contracts stay byte-identical and carry no ARM64 annotations', () => {
+  for (const family of ['nexus', 'nexus-cachyos']) {
+    const contract = payloadContract(family, {arch: 'x86_64'});
+    assert.equal(contract.scope, 'x86_64-full');
+    assert.ok(contract.entries.every(item => item.arch === 'x86_64' || item.arch === 'any'));
+    assert.ok(contract.entries.every(item => item.producer === undefined && item.evidence === undefined));
+    assert.equal(contract.narrowerTargets, undefined);
+  }
+  assert.deepEqual(payloadContract('nexus').entries.map(item => item.path), payloadContract('nexus', {arch: 'x86_64'}).entries.map(item => item.path));
+  assert.throws(() => payloadContract('unknown'), /Unsupported runtime family/);
+});
+test('a missing, mislabelled or weakened ARM64 payload fails closed', async () => {
+  // A real x64 tree is not an ARM64 candidate: the ARM64 loader is missing.
+  await withFixture('arm64-as-x64', {family: 'nexus', arch: 'x86_64'}, async runtime => {
+    await assert.rejects(() => verifyRuntimePayload(runtime, {family: 'nexus', arch: 'arm64'}), /Runtime payload missing: wine-engine: files\/bin-arm64\/wine/);
+  });
+  // An x64 tree relabelled as ARM64 must not satisfy the ARM64 contract.
+  await withFixture('x64-relabelled', {family: 'nexus', arch: 'arm64'}, async runtime => {
+    await fs.rm(path.join(runtime, 'files/lib/wine/x86_64-windows/kernel32.dll'));
+    await assert.rejects(() => verifyRuntimePayload(runtime, {family: 'nexus', arch: 'arm64'}), /Runtime payload missing: wine-engine: files\/lib\/wine\/x86_64-windows\/kernel32\.dll/);
+  });
+  // A missing FEX runtime or i386 PE directory is a real ARM64 payload gap.
+  for (const [removed, expected] of [
+    ['files/lib/wine/aarch64-unix/libwow64fex.so', /fex: files\/lib\/wine\/aarch64-unix\/libwow64fex\.so/],
+    ['files/lib/wine/aarch64-windows/libarm64ecfex.dll', /fex: files\/lib\/wine\/aarch64-windows\/libarm64ecfex\.dll/],
+    ['files/lib/wine/i386-windows/libnghttp2.dll', /nghttp2: files\/lib\/wine\/i386-windows\/libnghttp2\.dll/],
+    ...['aarch64','x86_64','i386'].map(arch=>[`files/lib/wine/${arch}-windows/umu.exe`, /non-steam-umu:/]),
+    ['files/share/fex-emu/Config.json', /fex: files\/share\/fex-emu\/Config\.json/],
+    ['files/share/default_pfx_arm64/drive_c/windows/system32', /default-prefix: files\/share\/default_pfx_arm64/],
+  ]) {
+    await withFixture('arm64-missing', {family: 'nexus', arch: 'arm64'}, async runtime => {
+      await fs.rm(path.join(runtime, removed), {recursive: true, force: true});
+      await assert.rejects(() => verifyRuntimePayload(runtime, {family: 'nexus', arch: 'arm64'}), expected);
+    });
+  }
+  // An ARM64 prefix entry that escapes the runtime through an external link fails.
+  await withFixture('arm64-escape', {family: 'nexus', arch: 'arm64'}, async runtime => {
+    const target = path.join(runtime, 'files/lib/wine/aarch64-unix/winex11.so');
+    await fs.rm(target);
+    await fs.symlink('/etc/hostname', target);
+    await assert.rejects(() => verifyRuntimePayload(runtime, {family: 'nexus', arch: 'arm64'}), /external symlink|outside the runtime/);
   });
 });

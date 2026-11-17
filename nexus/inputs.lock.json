@@ -7,8 +7,8 @@
   "sdkArm64": "registry.gitlab.steamos.cloud/proton/steamrt4/sdk/arm64-llvm@sha256:3a8199ffdd54c51f47e1b0d059e6fe583745214043f1f8c2e2e18377e72a3776",
   "upstream": {
     "proton": "7a94df49e4695fc101fd47d614166e69c43d9669",
-    "wine": "5901a6881d971766d465250c1d91bbb1173271c9",
-    "xgameruntime": "d5ec2d0e5bcf3dae6b16e61dd37f3c30fcf78352"
+    "wine": "5c33441ced2ae794415e558afb87a6fdd20fe32e",
+    "xgameruntime": "dc434fb0c4d16307cff33807ed74b5e50ef328a9"
   },
   "modules": {
     "dxvk": "a78a467cadb22bee928904290cf8e7921b121851",

@@ -201,6 +201,15 @@ make UNSTRIPPED_BUILD=1 install
 ### ARM64 Builds
 
 You need an ARM64 build machine and pass `--target-arch=arm64` to `configure.sh`.
+The Nexus CI equivalent is `node nexus/build-runtime.mjs --arch arm64`, which
+selects the pinned arm64-llvm SDK and the aarch64 host tools.
+
+The ARM64 redistribution ships `files/bin-arm64/{wine,wineserver}`,
+`files/share/default_pfx_arm64/` and aarch64/x86_64/i386 PE directories; the
+x86_64 and i386 modules run through FEX. Its managed family receipt
+(`nexus-family.json`) records `arch: "arm64"` and requires the real ARM64
+critical payload and native gate set, so an x86_64 tree can never be labelled
+as ARM64.
 
 It's not possible to use the resulting builds in x86 Steam running via FEX.
 

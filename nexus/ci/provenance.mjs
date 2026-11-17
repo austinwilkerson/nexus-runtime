@@ -22,9 +22,35 @@ export async function treeHash(root) {
   }
   await visit(root);return digest.digest('hex');
 }
-export function validateGateResults(results) {
-  const expected=['win64-component','win64-authentication','win64-user-contracts','win64-store','win32-component','win32-authentication','win32-user-contracts','win32-store','wine-native-contracts','http','media','graphics'];
+// Native gate names per distribution architecture. x86_64 keeps exactly its
+// twelve gates; arm64 needs the same two-ABI component/auth/user/store and
+// HTTP/media/graphics suites plus honesty and layout/prefix-load gates on a
+// native aarch64 host.
+export const nativeGates=Object.freeze({
+  x64:Object.freeze(['win64-component','win64-authentication','win64-user-contracts','win64-store','win32-component','win32-authentication','win32-user-contracts','win32-store','wine-native-contracts','http','media','graphics']),
+  arm64:Object.freeze(['arm64-layout','arm64-prefix-boot','arm64-load-aarch64','arm64-load-x86_64','arm64-load-i386',...['win64','win32'].flatMap(abi=>['component','authentication','user-contracts','store'].map(gate=>abi+'-'+gate)),'arm64-http','arm64-media','arm64-graphics']),
+});
+export function gateNames(arch){
+  if(!Object.hasOwn(nativeGates,arch))throw Error('Unsupported native gate architecture');
+  return [...nativeGates[arch]];
+}
+export function validateGateResults(results,arch='x64') {
+  const expected=gateNames(arch);
   if(!Array.isArray(results)||results.length!==expected.length||results.some((r,i)=>r.name!==expected[i]||r.status!==0||r.signal||r.error||!/^[a-f0-9]{64}$/.test(r.sha256)))throw Error('Incomplete or failed native gates');
+}
+// Bind a candidate to its architecture, repository, exact name stems and native
+// gates. Every packager calls this before it writes any candidate artifact, so
+// a payload can never be relabelled by name, repository or gate count.
+export function validatePackagedArchitecture(built,opts){
+ const {arch,repository,proofArch,gates}=opts;
+ if(!Object.hasOwn(nativeGates,arch)||proofArch!==arch)throw new Error('Candidate architecture and native proof disagree');
+ if(repository!=='domsvoboda/nexus-runtime')throw new Error('Candidate repository identity is not this family');
+ const expectedName='nexus-runtime-11.0-experimental'+(arch==='arm64'?'-arm64':'')+'-g[a-f0-9]{8}';
+ if(new RegExp('^'+expectedName+'$').test(built.name)===false||path.basename(built.runtime)!==built.name)throw new Error('Candidate name does not match its architecture');
+ const actualArch=built.metadata?.targetArchitecture==='arm64'?'arm64':'x64';
+ if(actualArch!==arch)throw new Error('Assembled runtime is not the packaged architecture');
+ if(!Array.isArray(gates)||gates.length!==nativeGates[arch].length||gates.some((gate,index)=>gate!==nativeGates[arch][index]))throw new Error('Candidate native gates do not match the architecture contract');
+ return Object.freeze({arch,name:built.name,gates:[...gates]});
 }
 export async function assertPortable(runtime) {
   runtime=await fs.realpath(runtime);
