@@ -66,6 +66,72 @@ function commonEntries() {
   return list;
 }
 
+// The native ARM64 target of the same pinned source graph. Paths are the real
+// Makefile.in outputs for TARGET_ARCH=arm64: aarch64, x86_64 (ARM64EC/WoW64
+// through FEX) and i386 PE directories, aarch64 Unix libraries, the shared
+// ARM64X winhttp/nghttp2 modules and the ARM64 prefix template. Every listed
+// entry is required, so a reduced ARM64 payload fails closed; this is a layout
+// contract, not proof that a game or storefront flow works.
+const arm64PeArchitectures = Object.freeze(['aarch64', 'x86_64', 'i386']);
+const unixFeatures = Object.freeze({
+  'ntdll.so': 'wine-engine', 'win32u.so': 'wine-engine', 'winevulkan.so': 'vulkan',
+  'winex11.so': 'x11', 'winepulse.so': 'audio-pulse', 'winealsa.so': 'audio-alsa',
+  'winegstreamer.so': 'media-gstreamer', 'wineopenxr.so': 'openxr',
+  'libarm64ecfex.so': 'fex', 'libwow64fex.so': 'fex',
+});
+function arm64Entries() {
+  const list = [
+    entry({arch: 'arm64', path: 'files/bin-arm64/wine', kind: 'file', feature: 'wine-engine', executable: true, producer: 'Makefile.in', evidence: Object.freeze(['$(call install-strip,$(WINE_aarch64_DST)/bin/wine,$(DST_DIR)/bin-arm64)'])}),
+    entry({arch: 'arm64', path: 'files/bin-arm64/wineserver', kind: 'file', feature: 'wine-engine', executable: true, producer: 'Makefile.in', evidence: Object.freeze(['$(call install-strip,$(WINE_aarch64_DST)/bin/wineserver,$(DST_DIR)/bin-arm64)'])}),
+    entry({arch: 'arm64', path: 'files/bin-arm64/wine.nexus-original', kind: 'file', feature: 'wine-engine', executable: true, producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['files/bin-arm64/wine', 'wine.nexus-original'])}),
+    entry({arch: 'arm64', path: 'files/share/default_pfx_arm64/drive_c/windows/system32', kind: 'directory', feature: 'default-prefix', producer: 'Makefile.in', evidence: Object.freeze(['DIST_PREFIX_ARM64 := $(DST_DIR)/share/default_pfx_arm64/'])}),
+    entry({arch: 'arm64', path: 'files/share/xodus-nexus/compat', kind: 'directory', feature: 'nexus-compat', producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['share/xodus-nexus/compat'])}),
+    entry({arch: 'arm64', path: 'files/share/xodus-nexus/compat/PlayFabGameSave.dll', kind: 'file', feature: 'nexus-cloud-saves', producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['PlayFabGameSave.dll'])}),
+    entry({arch: 'arm64', path: 'files/share/xodus-nexus/compat/gaming-services-version.exe', kind: 'file', feature: 'nexus-compat', producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['gaming-services-version.exe'])}),
+    entry({arch: 'arm64', path: 'files/share/xodus-nexus/compat/package-registration.exe', kind: 'file', feature: 'nexus-package-registration', producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['package-registration.exe'])}),
+    entry({arch: 'arm64', path: 'files/share/openxr/wineopenxr64.json', kind: 'file', feature: 'openxr', producer: 'Makefile.in', evidence: Object.freeze(['WINEOPENXR64_JSON := $(DST_DIR)/share/openxr/wineopenxr64.json'])}),
+    entry({arch: 'arm64', path: 'files/share/fex-emu/Config.json', kind: 'file', feature: 'fex', producer: 'Makefile.in', evidence: Object.freeze(['FEX_CONFIG_JSON := $(DST_DIR)/share/fex-emu/Config.json'])}),
+    entry({arch: 'arm64', path: 'files/share/wine/mono/wine-mono', kind: 'symlink', feature: 'wine-mono', producer: 'Makefile.in', evidence: Object.freeze(['WINEMONO_aarch64_TARBALL := wine-mono-$(WINEMONO_VER)-arm64.tar.xz'])}),
+    entry({arch: 'arm64', path: 'files/share/xalia/SDL3.dll', kind: 'symlink', feature: 'controller-sdl', producer: 'Makefile.in', evidence: Object.freeze(['ln -s ../wine/mono/wine-mono/lib/arm64/SDL3.dll $(DIST_XALIA_DIR)/SDL3.dll'])}),
+    entry({arch: 'arm64', path: 'files/lib/wine/dxvk/version', kind: 'file', feature: 'dxvk', producer: 'Makefile.in'}),
+    entry({arch: 'arm64', path: 'files/lib/wine/vkd3d-proton/version', kind: 'file', feature: 'vkd3d-proton', producer: 'Makefile.in'}),
+  ];
+  // The C++ runtime, winhttp+nghttp2 and the Wine builtins exist in every PE
+  // directory. xgameruntime/winhttp are ARM64X modules installed in
+  // aarch64-windows and loaded by the x86_64/i386 builtins through FEX.
+  for (const arch of arm64PeArchitectures) {
+    list.push(
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/xgameruntime.dll`, kind: 'file', feature: 'nexus-cpp-runtime', producer: 'Makefile.in', evidence: Object.freeze(['rules-cmake,xgameruntime,arm64ec,windows'])}),
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/winhttp.dll`, kind: 'file', feature: 'wine-winhttp-http2', producer: 'wine-submodule'}),
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/libnghttp2.dll`, kind: 'file', feature: 'nghttp2', producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['files/lib/wine', 'libnghttp2.dll'])}),
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/umu.exe`, kind: 'file', feature: 'non-steam-umu', producer: 'Makefile.in', evidence: Object.freeze([`rules-makedep,umuexe,${arch}`])}),
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/kernel32.dll`, kind: 'file', feature: 'wine-engine', producer: 'wine-submodule'}),
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/ntdll.dll`, kind: 'file', feature: 'wine-engine', producer: 'wine-submodule'}),
+      entry({arch: 'arm64', path: `files/lib/wine/${arch}-windows/winegstreamer.dll`, kind: 'file', feature: 'media-gstreamer', producer: 'wine-submodule'}),
+      entry({arch: 'arm64', path: `files/lib/vkd3d/${arch}-windows/libvkd3d-shader-1.dll`, kind: 'file', feature: 'vkd3d-shader', producer: 'Makefile.in', evidence: Object.freeze(['$(VKD3D_arm64ec_LIBDIR)/vkd3d/aarch64-windows'])}),
+      entry({arch: 'arm64', path: `files/lib/wine/dxvk/${arch}-windows/dxgi.dll`, kind: 'file', feature: 'dxvk', producer: 'Makefile.in', evidence: Object.freeze(['DXVK_arm64ec_MESON_ARGS = --bindir=$(DXVK_arm64ec_DST)/lib/wine/dxvk/aarch64-windows'])}),
+      entry({arch: 'arm64', path: `files/lib/wine/dxvk/${arch}-windows/d3d11.dll`, kind: 'file', feature: 'dxvk', producer: 'Makefile.in', evidence: Object.freeze(['DXVK_arm64ec_MESON_ARGS = --bindir=$(DXVK_arm64ec_DST)/lib/wine/dxvk/aarch64-windows'])}),
+      entry({arch: 'arm64', path: `files/lib/wine/vkd3d-proton/${arch}-windows/d3d12.dll`, kind: 'file', feature: 'vkd3d-proton', producer: 'Makefile.in', evidence: Object.freeze(['VKD3D_PROTON_arm64ec_MESON_ARGS = --bindir=$(VKD3D_PROTON_arm64ec_DST)/lib/wine/vkd3d-proton/aarch64-windows'])}),
+    );
+  }
+  // Real ARM64 upstream outputs whose presence the archived ARM64
+  // redistribution confirmed. Further aarch64-only upstream files are not
+  // required until an actual ARM64 build proves them.
+  list.push(entry({arch: 'arm64', path: 'files/lib/wine/aarch64-windows/wineopenxr.dll', kind: 'file', feature: 'openxr', producer: 'wine-submodule'}));
+  list.push(entry({arch: 'arm64', path: 'files/lib/wine/aarch64-windows/libarm64ecfex.dll', kind: 'file', feature: 'fex', producer: 'Makefile.in', evidence: Object.freeze(['rules-cmake,fex,arm64ec,windows'])}));
+  for (const [name, feature] of Object.entries(unixFeatures)) list.push(entry({arch: 'arm64', path: `files/lib/wine/aarch64-unix/${name}`, kind: 'file', feature, producer: name.includes('fex') ? 'Makefile.in' : 'wine-submodule', ...(name.includes('fex') ? {evidence: Object.freeze(['rules-cmake,fex_unixlib,aarch64,unix'])} : {})}));
+  return list;
+}
+
+// Shared-source features the ARM64 target really builds through narrower
+// native paths. They are recorded, not required entries and not removed
+// features; they do not claim x86_64 parity, and each names its Makefile.in
+// evidence.
+const arm64NarrowerTargets = Object.freeze([
+  Object.freeze({feature: 'wine-mono', reason: 'narrower-native-target', evidence: 'WINEMONO_aarch64_TARBALL := wine-mono-$(WINEMONO_VER)-arm64.tar.xz', detail: 'The ARM64 build ships the arm64 wine-mono archive, not the x86_64 one.'}),
+  Object.freeze({feature: 'controller-sdl', reason: 'narrower-native-target', evidence: 'ln -s ../wine/mono/wine-mono/lib/arm64/SDL3.dll $(DIST_XALIA_DIR)/SDL3.dll', detail: 'The SDL3 controller library comes from the arm64 wine-mono tree.'}),
+]);
+
 // The CachyOS feature layer. The pinned upstream source enables these build
 // namespaces by default; the payload contract keeps them required so a reduced
 // "OptiScaler only" or otherwise stripped build cannot be assembled silently.
@@ -360,22 +426,55 @@ export const payloadProducers = Object.freeze([
   Object.freeze({feature: 'vulkan-low-latency', producer: 'vklayers/build-low_latency_layer.mk', evidence: Object.freeze(['$(DST_DIR)/share/low_latency_layer/implicit_layer.d/'])}),
   Object.freeze({feature: 'vulkan-vkbasalt', producer: 'vklayers/build-vkbasalt.mk', evidence: Object.freeze(['$(DST_DIR)/share/vkbasalt/implicit_layer.d/'])}),
   Object.freeze({feature: 'vulkan-pyroveil', producer: 'vklayers/build-pyroveil.mk', evidence: Object.freeze(['$(DST_DIR)/share/pyroveil/implicit_layer.d/', 'rsync --delete -arx $(PYROVEIL_SRC)/hacks $(DST_DIR)/share/pyroveil/'])}),
+  // ARM64-specific producers. Each value must exist in the real Makefile.in.
+  Object.freeze({feature: 'fex', producer: 'Makefile.in', evidence: Object.freeze(['rules-cmake,fex,arm64ec,windows', 'rules-cmake,fex_unixlib,aarch64,unix', 'FEX_CONFIG_JSON := $(DST_DIR)/share/fex-emu/Config.json'])}),
+  Object.freeze({feature: 'wine-mono-arm64', producer: 'Makefile.in', evidence: Object.freeze(['WINEMONO_aarch64_TARBALL := wine-mono-$(WINEMONO_VER)-arm64.tar.xz'])}),
+  Object.freeze({feature: 'controller-sdl-arm64', producer: 'Makefile.in', evidence: Object.freeze(['ln -s ../wine/mono/wine-mono/lib/arm64/SDL3.dll $(DIST_XALIA_DIR)/SDL3.dll'])}),
+  Object.freeze({feature: 'nexus-cpp-runtime-arm64', producer: 'Makefile.in', evidence: Object.freeze(['rules-cmake,xgameruntime,arm64ec,windows', 'XGAMERUNTIME_arm64ec_CMAKE_ARGS', '-DCMAKE_INSTALL_LIBDIR=lib/wine/aarch64-windows'])}),
+  Object.freeze({feature: 'dxvk-arm64', producer: 'Makefile.in', evidence: Object.freeze(['DXVK_arm64ec_MESON_ARGS = --bindir=$(DXVK_arm64ec_DST)/lib/wine/dxvk/aarch64-windows'])}),
+  Object.freeze({feature: 'vkd3d-proton-arm64', producer: 'Makefile.in', evidence: Object.freeze(['VKD3D_PROTON_arm64ec_MESON_ARGS = --bindir=$(VKD3D_PROTON_arm64ec_DST)/lib/wine/vkd3d-proton/aarch64-windows'])}),
+  Object.freeze({feature: 'vkd3d-shader-arm64', producer: 'Makefile.in', evidence: Object.freeze(['$(VKD3D_arm64ec_LIBDIR)/vkd3d/aarch64-windows'])}),
+  Object.freeze({feature: 'prefix-arm64', producer: 'Makefile.in', evidence: Object.freeze(['DIST_PREFIX_ARM64 := $(DST_DIR)/share/default_pfx_arm64/', 'default_pfx.py $(abspath $(DIST_PREFIX_ARM64)) $(abspath $(DST_DIR)) 1'])}),
+  Object.freeze({feature: 'wine-engine-arm64', producer: 'Makefile.in', evidence: Object.freeze(['$(call install-strip,$(WINE_aarch64_DST)/bin/wine,$(DST_DIR)/bin-arm64)', '$(OBJ)/.wine-aarch64-post-build:'])}),
+  Object.freeze({feature: 'nghttp2-arm64', producer: 'nexus/assemble-runtime.mjs', evidence: Object.freeze(['files/lib/wine', 'libnghttp2.dll'])}),
 ]);
 
 export function payloadContract(family = 'nexus', {arch = 'x86_64'} = {}) {
   if (!families.includes(family)) throw Error('Unsupported runtime family');
   if (arch !== 'x86_64' && arch !== 'arm64') throw Error('Unsupported payload contract architecture');
   if (family === 'nexus-cachyos' && arch !== 'x86_64') throw Error('Unreviewed CachyOS payload architecture');
+  if (arch === 'arm64') {
+    // The Standard ARM64 target has its own real layout. CachyOS ARM64 stays
+    // refused above and is never approximated by the Standard contract.
+    // The shared x86_64-only entries are replaced by arm64Entries(), which
+    // carries the equivalent real ARM64 paths; only arch-neutral entries keep
+    // applying. Nothing is relabelled and no entry becomes silently optional.
+    const entries = [...commonEntries().filter(item => item.arch === 'any'), ...arm64Entries()].map(item => Object.freeze({...item}));
+    return Object.freeze({
+      schema: 1,
+      family,
+      arch,
+      scope: 'arm64-full',
+      entries: Object.freeze(entries),
+      layerManifests: Object.freeze([]),
+      defaultDisabled: standardFacts.defaultDisabled,
+      runtimeProvided: standardFacts.runtimeProvided,
+      documentedOnly: standardFacts.documentedOnly,
+      nativeCapabilities: standardFacts.nativeCapabilities,
+      architectureLimits: Object.freeze([Object.freeze({arch: 'x86_64', reason: 'The x86_64-only entries of the shared contract are replaced by the real ARM64 layout, not relabelled.'})]),
+      narrowerTargets: arm64NarrowerTargets,
+    });
+  }
   const all = family === 'nexus-cachyos' ? [...commonEntries(), ...cachyosEntries()] : commonEntries();
-  const entries = (arch === 'x86_64' ? all : all.filter(item => item.arch === 'any')).map(item => Object.freeze({...item}));
+  const entries = all.map(item => Object.freeze({...item}));
   const facts = family === 'nexus-cachyos' ? cachyosFacts : standardFacts;
   return Object.freeze({
     schema: 1,
     family,
     arch,
-    scope: arch === 'x86_64' ? 'x86_64-full' : 'non-x86_64-minimal',
+    scope: 'x86_64-full',
     entries: Object.freeze(entries),
-    layerManifests: arch === 'x86_64' && family === 'nexus-cachyos' ? layerManifests : Object.freeze([]),
+    layerManifests: family === 'nexus-cachyos' ? layerManifests : Object.freeze([]),
     defaultDisabled: facts.defaultDisabled,
     runtimeProvided: facts.runtimeProvided,
     documentedOnly: facts.documentedOnly,
@@ -503,5 +602,6 @@ export async function verifyRuntimePayload(runtime, {family = 'nexus', arch = 'x
     documentedOnly: contract.documentedOnly,
     nativeCapabilities: contract.nativeCapabilities,
     architectureLimits: contract.architectureLimits,
+    ...(contract.narrowerTargets ? {narrowerTargets: contract.narrowerTargets} : {}),
   });
 }
