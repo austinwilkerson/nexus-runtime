@@ -60,3 +60,15 @@ pass. A different source commit requires a new build.
 
 Auxiliary dependencies are cached by their recipe, input locks, architecture and
 runner image. Restored dependencies are verified before use.
+
+## Native text-entry helper staging
+
+`nexus/native-text-entry.mjs` stages an architecture-independent helper from a
+built XGameRuntime PE directory into the default prefix's system directory,
+and records its checksum and host GTK4/PyGObject requirements in metadata.
+Older pinned components without that helper retain their existing assembly.
+This packaging does not change the component source pin or claim gameplay
+validation. It is preparation for the paired XGameRuntime text-entry change.
+
+No compositor configuration is installed or modified. Optional focus rules
+belong in user configuration and must not name a particular monitor or machine.
