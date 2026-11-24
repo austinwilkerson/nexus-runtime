@@ -50,7 +50,10 @@ for(const name of prefixComponents){
   const temporary=dest+'.nexus-runtime';await fs.writeFile(temporary,bytes,{flag:'wx'});await fs.rename(temporary,dest);
 }
 const nativeTextEntry=await stageNativeTextEntry(files,target);
-if(nativeTextEntry)components['nexus-text-entry.py']=nativeTextEntry.sha256;
+if(nativeTextEntry){
+  components['nexus-text-entry.py']=nativeTextEntry.sha256;
+  components['nexus-text-entry-host.exe']=nativeTextEntry.bridgeSha256[target.primaryPe];
+}
 // Keep portable media separate from the SDK-built Wine. Existing libraries are
 // never silently replaced by the auxiliary bundle.
 for(const [triplet,architecture]of Object.entries(media.architectures)){
